@@ -593,3 +593,18 @@ def create_message_set(messages, codec=CODEC_NONE):
         return [create_snappy_message(messages)]
     else:
         raise UnsupportedCodecError("Codec 0x%02x unsupported" % codec)
+
+def create_keyed_message_set(messages, key, codec=CODEC_NONE):
+    """Create a message set using the given codec.
+
+    If codec is CODEC_NONE, return a list of raw Kafka messages. Otherwise,
+    return a list containing a single codec-encoded message.
+    """
+    if codec == CODEC_NONE:
+        return [create_message(m, key) for m in messages]
+    elif codec == CODEC_GZIP:
+        return [create_gzip_message(messages, key)]
+    elif codec == CODEC_SNAPPY:
+        return [create_snappy_message(messages, key)]
+    else:
+        raise UnsupportedCodecError("Codec 0x%02x unsupported" % codec)

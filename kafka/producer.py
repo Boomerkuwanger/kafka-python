@@ -19,7 +19,7 @@ from kafka.common import (
     ProduceRequest, TopicAndPartition, UnsupportedCodecError, UnknownTopicOrPartitionError
 )
 from kafka.partitioner import HashedPartitioner
-from kafka.protocol import CODEC_NONE, ALL_CODECS, create_message_set
+from kafka.protocol import CODEC_NONE, ALL_CODECS, create_message_set, create_keyed_message_set
 
 log = logging.getLogger("kafka")
 
@@ -156,6 +156,46 @@ class Producer(object):
             # Process will die if main thread exits
             self.proc.daemon = True
             self.proc.start()
+
+    def send_keyed_messages(self, topic, partition, key, *msg):
+        """
+        Helper method to send produce requests
+        @param: topic, name of topic for produce request -- type str
+        @param: partition, partition number for produce request -- type int
+        @param: *msg, one or more message payloads -- type bytes
+        @returns: ResponseRequest returned by server
+        raises on error
+
+        Note that msg type *must* be encoded to bytes by user.
+        Passing unicode message will not work, for example
+        you should encode before calling send_messages via
+        something like `unicode_message.encode('utf-8')`
+
+        All messages produced via this method will set the message 'key' to Null
+        """
+
+        # Guarantee that msg is actually a list or tuple (should always be true)
+        if not isinstance(msg, (list, tuple)):
+            raise TypeError("msg is not a list or tuple!")
+
+        # Raise TypeError if any message is not encoded as bytes
+        if any(not isinstance(m, six.binary_type) for m in msg):
+            raise TypeError("all produce message payloads must be type bytes")
+
+        if self.async:
+            for m in msg:
+                self.queue.put((TopicAndPartition(topic, partition), m))
+            resp = []
+        else:
+            messages = create_keyed_message_set(msg, key, self.codec)
+            req = ProduceRequest(topic, partition, messages)
+            try:
+                resp = self.client.send_produce_request([req], acks=self.req_acks,
+                                                        timeout=self.ack_timeout)
+            except Exception:
+                log.exception("Unable to send messages")
+                raise
+        return resp
 
     def send_messages(self, topic, partition, *msg):
         """
@@ -313,7 +353,7 @@ class KeyedProducer(Producer):
 
     def send(self, topic, key, msg):
         partition = self._next_partition(topic, key)
-        return self.send_messages(topic, partition, msg)
+        return self.send_keyed_messages(topic, partition, key, msg)
 
     def __repr__(self):
         return '<KeyedProducer batch=%s>' % self.async
